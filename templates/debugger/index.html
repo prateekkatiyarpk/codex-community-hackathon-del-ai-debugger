@@ -62,7 +62,7 @@
 
         <div class="submit-status" id="submit-status" aria-live="polite" hidden>
           <span class="spinner" aria-hidden="true"></span>
-          <span>GPT-5.4 is reading the traceback and nearby code.</span>
+          <span>Analyzing the traceback and nearby code.</span>
         </div>
 
         <p class="input-note">Best results come from the final exception, the relevant app frames, and the nearest view, model, template, URL, or test code.</p>
@@ -108,7 +108,7 @@
         {% elif analysis.source == "demo" %}
           <div class="notice notice-calm">
             <strong>Built-in demo analysis.</strong>
-            <span>Set OPENAI_API_KEY to analyze your own tracebacks with a live model.</span>
+            <span>Set OPENAI_API_KEY to analyze your own tracebacks live.</span>
           </div>
         {% endif %}
 
