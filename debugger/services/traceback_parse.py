@@ -30,6 +30,7 @@ def parse_failure_clues(error_log: str) -> FailureClues:
 
     _parse_python_frames(error_log, file_names, line_numbers, module_terms, symbols)
     _parse_generic_file_lines(error_log, file_names, line_numbers, module_terms)
+    _parse_test_nodeids(error_log, file_names, line_numbers, module_terms, test_names)
     _parse_templates_and_components(error_log, file_names, template_names)
     _parse_symbols_and_tests(error_log, symbols, test_names)
     _parse_packages(error_log, package_terms)
@@ -98,6 +99,19 @@ def _parse_generic_file_lines(
     for pattern in patterns:
         for match in re.finditer(pattern, error_log):
             _record_file(match.group(1), int(match.group(2)), file_names, line_numbers, module_terms)
+
+
+def _parse_test_nodeids(
+    error_log: str,
+    file_names: set[str],
+    line_numbers: dict[str, int],
+    module_terms: set[str],
+    test_names: set[str],
+) -> None:
+    pattern = r"((?:[\w.-]+/)*[\w.-]+\.(?:py|js|jsx|ts|tsx|java|go|rb|php|rs))::([A-Za-z0-9_]+)"
+    for match in re.finditer(pattern, error_log):
+        _record_file(match.group(1), 1, file_names, line_numbers, module_terms)
+        test_names.add(match.group(2))
 
 
 def _parse_templates_and_components(

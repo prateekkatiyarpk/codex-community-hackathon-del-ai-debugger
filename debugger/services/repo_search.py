@@ -203,6 +203,23 @@ def score_file(relative_path: str, content: str, clues: FailureClues) -> tuple[i
         score += 15
         reasons.append(f"exception mention: {clues.exception_type}")
 
+    exception_lower = clues.exception_type.lower()
+    if exception_lower in {"noreversematch", "templateerror", "templatedoesnotexist"}:
+        if basename.lower() == "urls.py":
+            score += 55
+            reasons.append("Django URL config candidate")
+        if "/templates/" in path_lower or path_lower.startswith("templates/"):
+            score += 40
+            reasons.append("Django template candidate")
+        if "{% url" in content_lower or "reverse(" in content_lower:
+            score += 35
+            reasons.append("Django URL usage")
+
+    if exception_lower in {"improperlyconfigured", "operationalerror", "programmingerror"}:
+        if basename.lower() in {"settings.py", "models.py"} or "/migrations/" in path_lower:
+            score += 35
+            reasons.append("Python framework configuration candidate")
+
     return score, reasons
 
 

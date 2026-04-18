@@ -41,16 +41,20 @@ def detect_language_profile(root: Path | None, manual_context: str = "") -> Lang
     scores: dict[str, int] = {}
     signals: list[str] = []
     file_names: set[str] = set()
+    file_paths: set[str] = set()
     package_json = ""
     java_config_text = ""
     python_text = manual_context.lower()
+    python_config_text = ""
     has_typescript_file = False
 
     if root and root.exists():
         for path in iter_source_files(root):
+            relative = path.relative_to(root).as_posix()
             name = path.name
             lower_name = name.lower()
             file_names.add(name)
+            file_paths.add(relative.lower())
 
             suffix = path.suffix.lower()
             if suffix in {".ts", ".tsx"}:
@@ -63,6 +67,11 @@ def detect_language_profile(root: Path | None, manual_context: str = "") -> Lang
             if lower_name in {"pyproject.toml", "requirements.txt", "setup.py", "manage.py"}:
                 scores["Python"] = scores.get("Python", 0) + 8
                 signals.append(name)
+                if lower_name != "manage.py":
+                    try:
+                        python_config_text += "\n" + path.read_text(encoding="utf-8", errors="ignore")[:6000].lower()
+                    except OSError:
+                        pass
             elif lower_name == "package.json":
                 scores["JavaScript"] = scores.get("JavaScript", 0) + 8
                 signals.append(name)
@@ -103,7 +112,16 @@ def detect_language_profile(root: Path | None, manual_context: str = "") -> Lang
         scores["TypeScript"] = scores.get("TypeScript", 0) + 8
 
     language = max(scores, key=scores.get) if scores else _detect_from_text(manual_context)
-    framework = _detect_framework(language, file_names, package_json, python_text, java_config_text, manual_context)
+    framework = _detect_framework(
+        language,
+        file_names,
+        file_paths,
+        package_json,
+        python_text,
+        python_config_text,
+        java_config_text,
+        manual_context,
+    )
     return LanguageProfile(
         language=language or "Unknown",
         framework=framework or "Unknown",
@@ -134,15 +152,26 @@ def _detect_from_text(text: str) -> str:
 def _detect_framework(
     language: str,
     file_names: set[str],
+    file_paths: set[str],
     package_json: str,
     python_text: str,
+    python_config_text: str,
     java_config_text: str,
     manual_context: str,
 ) -> str:
-    text = f"{python_text}\n{java_config_text}\n{manual_context}".lower()
+    text = f"{python_text}\n{python_config_text}\n{java_config_text}\n{manual_context}".lower()
+    lower_names = {name.lower() for name in file_names}
 
     if language == "Python":
-        if "manage.py" in file_names or "django" in text:
+        has_django_shape = (
+            "settings.py" in lower_names
+            and "urls.py" in lower_names
+            and (
+                "views.py" in lower_names
+                or any("/templates/" in path or path.startswith("templates/") for path in file_paths)
+            )
+        )
+        if "manage.py" in lower_names or "django" in text or has_django_shape:
             return "Django"
         if "fastapi" in text:
             return "FastAPI"

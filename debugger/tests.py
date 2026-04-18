@@ -28,6 +28,8 @@ REPO_TRACEBACK = """Traceback (most recent call last):
     return render(request, "posts/list.html", {"posts": posts})
 django.urls.exceptions.NoReverseMatch: Reverse for 'post_detail' with keyword arguments '{'pk': ''}' not found."""
 
+PYTEST_FAILURE = """FAILED tests/test_views.py::test_post_list_links - django.urls.exceptions.NoReverseMatch: Reverse for 'post_detail' not found"""
+
 
 def make_zip(files: dict[str, str]) -> bytes:
     buffer = io.BytesIO()
@@ -189,6 +191,7 @@ class DebuggerViewTests(SimpleTestCase):
             "repo.zip",
             make_zip(
                 {
+                    "manage.py": "from django.core.management import execute_from_command_line\n",
                     "posts/views.py": 'def post_list(request):\n    posts = Post.objects.values("title", "slug")\n',
                     "posts/templates/posts/list.html": "{% url 'post_detail' pk=post.pk %}",
                 }
@@ -210,7 +213,7 @@ class DebuggerViewTests(SimpleTestCase):
         _args, kwargs = mock_analyze_bug.call_args
         self.assertIn("posts/views.py", kwargs["code_context"])
         self.assertEqual(kwargs["detected_language"], "Python")
-        self.assertEqual(kwargs["detected_framework"], "Unknown")
+        self.assertEqual(kwargs["detected_framework"], "Django")
 
 
 class RepositoryContextTests(SimpleTestCase):
@@ -221,6 +224,13 @@ class RepositoryContextTests(SimpleTestCase):
         self.assertEqual(clues.line_numbers["views.py"], 6)
         self.assertEqual(clues.exception_type, "NoReverseMatch")
         self.assertIn("post_list", clues.symbols)
+
+    def test_parse_traceback_clues_extracts_pytest_nodeid(self):
+        clues = parse_traceback_clues(PYTEST_FAILURE)
+
+        self.assertIn("tests/test_views.py", clues.file_names)
+        self.assertIn("test_post_list_links", clues.test_names)
+        self.assertEqual(clues.line_numbers["tests/test_views.py"], 1)
 
     def test_discover_repo_context_prioritizes_traceback_file(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -244,6 +254,31 @@ class RepositoryContextTests(SimpleTestCase):
 
         self.assertTrue(snippets)
         self.assertEqual(snippets[0].file_path, "posts/views.py")
+
+    def test_discover_repo_context_includes_django_url_and_template_evidence(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            posts = root / "posts"
+            templates = posts / "templates" / "posts"
+            templates.mkdir(parents=True)
+            (posts / "views.py").write_text(
+                "def post_list(request):\n    return render(request, 'posts/list.html', {'posts': posts})\n",
+                encoding="utf-8",
+            )
+            (posts / "urls.py").write_text(
+                "urlpatterns = [path('posts/<int:pk>/', views.post_detail, name='post_detail')]\n",
+                encoding="utf-8",
+            )
+            (templates / "list.html").write_text(
+                "{% for post in posts %}{% url 'post_detail' pk=post.pk %}{% endfor %}",
+                encoding="utf-8",
+            )
+
+            snippets = discover_repo_context(root, REPO_TRACEBACK)
+
+        paths = {snippet.file_path for snippet in snippets}
+        self.assertIn("posts/urls.py", paths)
+        self.assertIn("posts/templates/posts/list.html", paths)
 
     def test_build_repository_context_reports_unsafe_zip_path(self):
         uploaded = SimpleUploadedFile(
@@ -276,6 +311,58 @@ class RepositoryContextTests(SimpleTestCase):
 
         self.assertEqual(profile.language, "JavaScript")
         self.assertEqual(profile.framework, "React")
+
+    def test_language_detection_reads_python_config_for_framework(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "pyproject.toml").write_text(
+                "[project]\ndependencies = ['Django>=5.0']\n",
+                encoding="utf-8",
+            )
+            (root / "app.py").write_text("print('hello')", encoding="utf-8")
+
+            profile = detect_language_profile(root)
+
+        self.assertEqual(profile.language, "Python")
+        self.assertEqual(profile.framework, "Django")
+
+    def test_language_detection_detects_django_project_shape(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project = root / "config"
+            posts = root / "posts"
+            templates = posts / "templates" / "posts"
+            project.mkdir()
+            posts.mkdir()
+            templates.mkdir(parents=True)
+            (project / "settings.py").write_text("INSTALLED_APPS = []", encoding="utf-8")
+            (project / "urls.py").write_text("urlpatterns = []", encoding="utf-8")
+            (posts / "views.py").write_text("def post_list(request): pass", encoding="utf-8")
+            (templates / "list.html").write_text("{{ posts }}", encoding="utf-8")
+
+            profile = detect_language_profile(root)
+
+        self.assertEqual(profile.language, "Python")
+        self.assertEqual(profile.framework, "Django")
+
+    def test_zip_context_detects_nested_django_project(self):
+        uploaded = SimpleUploadedFile(
+            "repo.zip",
+            make_zip(
+                {
+                    "demo-main/manage.py": "from django.core.management import execute_from_command_line\n",
+                    "demo-main/posts/views.py": "def post_list(request): pass\n",
+                    "demo-main/posts/templates/posts/list.html": "{% url 'post_detail' pk=post.pk %}",
+                }
+            ),
+            content_type="application/zip",
+        )
+
+        context = build_repository_context(error_log=REPO_TRACEBACK, uploaded_zip=uploaded)
+
+        self.assertEqual(context.detected_language, "Python")
+        self.assertEqual(context.detected_framework, "Django")
+        self.assertIn("demo-main/posts/views.py", context.inspected_files)
 
     def test_language_detection_handles_github_archive_top_folder(self):
         with tempfile.TemporaryDirectory() as temp_dir:
