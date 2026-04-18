@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
+from debugger.services.language_detect import LanguageProfile, detect_language_profile
 from debugger.services.repo_search import CodeSnippet, discover_repo_context, render_snippets_context
 
 
@@ -23,6 +24,7 @@ CONTEXT_LIMIT = 60_000
 class RepositoryContext:
     source: str
     repo_label: str
+    language_profile: LanguageProfile
     snippets: list[CodeSnippet]
     errors: list[str]
     combined_context: str
@@ -43,6 +45,14 @@ class RepositoryContext:
     def inspected_files(self) -> list[str]:
         return [snippet.file_path for snippet in self.snippets]
 
+    @property
+    def detected_language(self) -> str:
+        return self.language_profile.badge_language
+
+    @property
+    def detected_framework(self) -> str:
+        return self.language_profile.badge_framework
+
 
 class RepoIngestError(Exception):
     pass
@@ -57,21 +67,30 @@ def build_repository_context(
 ) -> RepositoryContext:
     errors: list[str] = []
     snippets: list[CodeSnippet] = []
+    language_profile = detect_language_profile(None, f"{error_log}\n{manual_context}")
     source = "manual"
-    repo_label = "Traceback and optional extra context"
+    repo_label = "Failure log and optional extra context"
 
     if uploaded_zip:
         source = "zip"
         repo_label = getattr(uploaded_zip, "name", "Uploaded ZIP")
         try:
-            snippets = _snippets_from_uploaded_zip(uploaded_zip, error_log)
+            snippets, language_profile = _snippets_from_uploaded_zip(
+                uploaded_zip,
+                error_log,
+                manual_context,
+            )
         except RepoIngestError as exc:
             errors.append(str(exc))
     elif github_url.strip():
         source = "github"
         repo_label = github_url.strip()
         try:
-            snippets, repo_label = _snippets_from_github(github_url.strip(), error_log)
+            snippets, repo_label, language_profile = _snippets_from_github(
+                github_url.strip(),
+                error_log,
+                manual_context,
+            )
         except RepoIngestError as exc:
             errors.append(str(exc))
 
@@ -85,6 +104,7 @@ def build_repository_context(
     return RepositoryContext(
         source=source,
         repo_label=repo_label,
+        language_profile=language_profile,
         snippets=snippets,
         errors=errors,
         combined_context=combined_context[:CONTEXT_LIMIT],
@@ -99,7 +119,11 @@ def validate_github_repo_url(url: str) -> str:
     return f"https://github.com/{owner}/{repo}"
 
 
-def _snippets_from_uploaded_zip(uploaded_zip, error_log: str) -> list[CodeSnippet]:
+def _snippets_from_uploaded_zip(
+    uploaded_zip,
+    error_log: str,
+    manual_context: str,
+) -> tuple[list[CodeSnippet], LanguageProfile]:
     if getattr(uploaded_zip, "size", 0) and uploaded_zip.size > MAX_ZIP_BYTES:
         raise RepoIngestError("ZIP upload is too large. Keep it under 30 MB for this demo.")
 
@@ -114,10 +138,14 @@ def _snippets_from_uploaded_zip(uploaded_zip, error_log: str) -> list[CodeSnippe
             _safe_extract_zip(uploaded_zip, root)
         except zipfile.BadZipFile as exc:
             raise RepoIngestError("That file is not a valid ZIP archive.") from exc
-        return discover_repo_context(root, error_log)
+        return discover_repo_context(root, error_log), detect_language_profile(root, manual_context)
 
 
-def _snippets_from_github(github_url: str, error_log: str) -> tuple[list[CodeSnippet], str]:
+def _snippets_from_github(
+    github_url: str,
+    error_log: str,
+    manual_context: str,
+) -> tuple[list[CodeSnippet], str, LanguageProfile]:
     owner, repo, branch = _parse_github_url(github_url)
     branch = branch or _fetch_default_branch(owner, repo)
     label = f"{owner}/{repo}"
@@ -130,7 +158,11 @@ def _snippets_from_github(github_url: str, error_log: str) -> tuple[list[CodeSni
         extract_root.mkdir()
         with archive_path.open("rb") as archive:
             _safe_extract_zip(archive, extract_root)
-        return discover_repo_context(extract_root, error_log), label
+        return (
+            discover_repo_context(extract_root, error_log),
+            label,
+            detect_language_profile(extract_root, manual_context),
+        )
 
 
 def _parse_github_url(url: str) -> tuple[str, str, str]:

@@ -428,6 +428,27 @@ label {
   font-weight: 800;
 }
 
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.meta-badge,
+.fix-rank {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  border: 1px solid #c9ded0;
+  border-radius: 8px;
+  padding: 4px 9px;
+  background: var(--surface-strong);
+  color: var(--green-dark);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
 .result-meta span {
   display: inline-block;
   margin-left: 10px;
@@ -686,6 +707,54 @@ label {
   color: var(--muted);
 }
 
+.evidence-panel li {
+  padding-right: 8px;
+}
+
+.fix-options-section {
+  margin-top: 14px;
+}
+
+.fix-options-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.fix-card {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  background: #fff;
+}
+
+.fix-card-primary {
+  border-color: #bdd9c6;
+  background: #fbfdfb;
+}
+
+.fix-card h4 {
+  margin-top: 12px;
+}
+
+.fix-card p {
+  margin: 0 0 10px;
+  color: var(--muted);
+}
+
+.fix-card .tradeoff {
+  margin-bottom: 0;
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.fix-card pre {
+  max-height: 260px;
+  margin-top: 12px;
+  font-size: 0.78rem;
+}
+
 .diff-block {
   margin-top: 14px;
 }
@@ -733,7 +802,8 @@ code {
   .form-grid,
   .result-grid,
   .workflow-grid,
-  .snippet-grid {
+  .snippet-grid,
+  .fix-options-grid {
     grid-template-columns: 1fr;
   }
 

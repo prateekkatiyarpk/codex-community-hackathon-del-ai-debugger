@@ -5,14 +5,14 @@ from debugger.services.repo_ingest import MAX_ZIP_BYTES, RepoIngestError, valida
 
 class BugReportForm(forms.Form):
     error_log = forms.CharField(
-        label="Traceback or failing test output",
+        label="Stack trace, error log, failing test, or build output",
         required=True,
         max_length=60000,
         widget=forms.Textarea(
             attrs={
                 "class": "textarea textarea-error",
                 "rows": 16,
-                "placeholder": "Paste the Python/Django traceback, failing pytest output, or server error here...",
+                "placeholder": "Paste a stack trace, failing test output, runtime error, or build log here...",
                 "spellcheck": "false",
             }
         ),
@@ -46,7 +46,7 @@ class BugReportForm(forms.Form):
             attrs={
                 "class": "textarea textarea-code textarea-manual",
                 "rows": 10,
-                "placeholder": "Fallback only: paste a specific view, model, serializer, template, URL config, or test if the repo context needs a hint...",
+                "placeholder": "Fallback only: paste a specific function, component, config, template, test, or command detail if the repo context needs a hint...",
                 "spellcheck": "false",
             }
         ),

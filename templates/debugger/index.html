@@ -17,14 +17,14 @@
   <main class="page-shell">
     <section class="intro-band" aria-labelledby="page-title">
       <div>
-        <p class="eyebrow">Traceback-first Django debugging</p>
+        <p class="eyebrow">Evidence-backed failure triage</p>
         <h1 id="page-title">AI Debugger</h1>
-        <p class="lede">Paste the failure, connect a public repo or upload a ZIP, and get a focused diagnosis with the smallest useful fix.</p>
+        <p class="lede">Evidence-backed failure triage for any codebase, with stronger Python support.</p>
       </div>
       <div class="signal-panel" aria-hidden="true">
-        <div class="signal-row"><span class="dot dot-red"></span><span>Exception captured</span></div>
-        <div class="signal-row"><span class="dot dot-green"></span><span>Root cause isolated</span></div>
-        <div class="signal-row"><span class="dot dot-yellow"></span><span>Regression test queued</span></div>
+        <div class="signal-row"><span class="dot dot-red"></span><span>Failure signal captured</span></div>
+        <div class="signal-row"><span class="dot dot-green"></span><span>Repo context ranked</span></div>
+        <div class="signal-row"><span class="dot dot-yellow"></span><span>Validation step queued</span></div>
       </div>
     </section>
 
@@ -91,16 +91,16 @@
         </div>
 
         <div class="action-row">
-          <button type="submit" class="button button-primary" data-submit-button>Analyze Bug</button>
+          <button type="submit" class="button button-primary" data-submit-button>Analyze Failure</button>
           <button type="button" class="button button-secondary" id="load-demo">Load Demo Example</button>
         </div>
 
         <div class="submit-status" id="submit-status" aria-live="polite" hidden>
           <span class="spinner" aria-hidden="true"></span>
-          <span>Analyzing the traceback and repository context.</span>
+          <span>Analyzing the failure log and repository context.</span>
         </div>
 
-        <p class="input-note">Best results come from the final exception, the relevant app frames, and the nearest view, model, template, URL, or test code.</p>
+        <p class="input-note">Best results come from the final error, a public repo or ZIP, and any extra context that explains the failing command or expected behavior.</p>
       </form>
     </section>
 
@@ -108,13 +108,13 @@
       <section class="empty-state" aria-labelledby="workflow-title">
         <div class="empty-state-heading">
           <p class="eyebrow">How it works</p>
-          <h2 id="workflow-title">From traceback to next fix</h2>
+          <h2 id="workflow-title">From failure log to next fix</h2>
         </div>
         <div class="workflow-grid">
           <article class="workflow-step">
             <span class="step-badge">01</span>
-            <h3>Paste traceback</h3>
-            <p>Start with the final exception and the app frames closest to the failure.</p>
+            <h3>Paste failure log</h3>
+            <p>Start with a stack trace, failing test output, build error, or runtime log.</p>
           </article>
           <article class="workflow-step">
             <span class="step-badge">02</span>
@@ -124,7 +124,7 @@
           <article class="workflow-step">
             <span class="step-badge">03</span>
             <h3>Get diagnosis + patch</h3>
-            <p>Review the root cause, smallest fix, confidence, and one regression test to lock it down.</p>
+            <p>Review the root cause, evidence, ranked fixes, confidence, and one validation step.</p>
           </article>
         </div>
       </section>
@@ -137,6 +137,11 @@
             <p class="eyebrow">Agentic analysis</p>
             <h2 id="results-title">Diagnosis Complete</h2>
             <p class="diagnosis-lede">{{ analysis.issue_summary }}</p>
+            <div class="badge-row" aria-label="Detected repository metadata">
+              <span class="meta-badge">Language: {{ analysis.detected_language }}</span>
+              <span class="meta-badge">Framework: {{ analysis.detected_framework }}</span>
+              <span class="meta-badge">Bug type: {{ analysis.bug_type }}</span>
+            </div>
             <p class="result-meta">
               <span>Root cause isolated</span>
               {% if analysis.patch_diff %}
@@ -171,7 +176,7 @@
         {% elif analysis.source == "demo" %}
           <div class="notice notice-calm">
             <strong>Built-in demo analysis.</strong>
-            <span>Set OPENAI_API_KEY to analyze your own tracebacks live.</span>
+            <span>Set OPENAI_API_KEY to analyze your own failures live.</span>
           </div>
         {% endif %}
 
@@ -211,7 +216,7 @@
                 {% endfor %}
               </div>
             {% else %}
-              <p class="context-empty">No strongly matching repository files were found. The analysis used the traceback and any optional extra context instead.</p>
+              <p class="context-empty">No strongly matching repository files were found. The analysis used the failure log and any optional extra context instead.</p>
             {% endif %}
           </section>
         {% endif %}
@@ -267,30 +272,61 @@
           </article>
 
           <article class="result-card">
-            <h3>Suggested Fix</h3>
-            <p>{{ analysis.suggested_fix }}</p>
-          </article>
-
-          <article class="result-card">
-            <h3>Regression Test</h3>
+            <h3>Regression Test / Validation</h3>
             <p>{{ analysis.regression_test }}</p>
           </article>
         </div>
 
-        <details class="why-panel" open>
-          <summary>Why this diagnosis?</summary>
+        <details class="why-panel evidence-panel" open>
+          <summary>Evidence Used</summary>
           <ul>
-            {% for reason in analysis.diagnosis_reasons %}
-              <li>{{ reason }}</li>
+            {% for evidence in analysis.evidence_used %}
+              <li>{{ evidence }}</li>
             {% endfor %}
           </ul>
         </details>
+
+        <section class="fix-options-section" aria-labelledby="fix-options-title">
+          <div class="section-kicker">
+            <p class="eyebrow">Ranked fix options</p>
+            <h3 id="fix-options-title">What to try next</h3>
+          </div>
+          <div class="fix-options-grid">
+            <article class="fix-card fix-card-primary">
+              <span class="fix-rank">Recommended</span>
+              <h4>{{ analysis.recommended_fix.title }}</h4>
+              <p>{{ analysis.recommended_fix.explanation }}</p>
+              <p class="tradeoff"><strong>Tradeoff:</strong> {{ analysis.recommended_fix.tradeoff }}</p>
+              {% if analysis.recommended_fix.patch_diff %}
+                <pre><code>{{ analysis.recommended_fix.patch_diff }}</code></pre>
+              {% endif %}
+            </article>
+            <article class="fix-card">
+              <span class="fix-rank">Safest</span>
+              <h4>{{ analysis.safest_fix.title }}</h4>
+              <p>{{ analysis.safest_fix.explanation }}</p>
+              <p class="tradeoff"><strong>Tradeoff:</strong> {{ analysis.safest_fix.tradeoff }}</p>
+              {% if analysis.safest_fix.patch_diff %}
+                <pre><code>{{ analysis.safest_fix.patch_diff }}</code></pre>
+              {% endif %}
+            </article>
+            <article class="fix-card">
+              <span class="fix-rank">Alternative</span>
+              <h4>{{ analysis.alternative_fix.title }}</h4>
+              <p>{{ analysis.alternative_fix.explanation }}</p>
+              <p class="tradeoff"><strong>Tradeoff:</strong> {{ analysis.alternative_fix.tradeoff }}</p>
+              {% if analysis.alternative_fix.patch_diff %}
+                <pre><code>{{ analysis.alternative_fix.patch_diff }}</code></pre>
+              {% endif %}
+            </article>
+          </div>
+        </section>
 
         <article class="diff-block">
           <div class="section-title-row">
             <div>
               <p class="eyebrow">Smallest inferred patch</p>
-              <h3>Patch Diff</h3>
+              <h3>Recommended Patch Diff</h3>
             </div>
             {% if analysis.patch_diff %}
               <button type="button" class="button button-small button-secondary" data-copy-source="patch-diff">Copy Patch</button>

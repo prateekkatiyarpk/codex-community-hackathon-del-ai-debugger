@@ -4,6 +4,7 @@ from debugger.demo import DEMO_CODE_CONTEXT, DEMO_ERROR_LOG
 from debugger.forms import BugReportForm
 from debugger.services.debugger import analyze_bug
 from debugger.services.repo_ingest import build_repository_context
+from debugger.services.traceback_parse import fallback_evidence, parse_failure_clues
 
 
 def index(request):
@@ -23,6 +24,14 @@ def index(request):
             analysis = analyze_bug(
                 error_log=form.cleaned_data["error_log"],
                 code_context=repo_context.combined_context,
+                detected_language=repo_context.detected_language,
+                detected_framework=repo_context.detected_framework,
+                fallback_evidence=fallback_evidence(
+                    parse_failure_clues(form.cleaned_data["error_log"]),
+                    repo_context.inspected_files,
+                    repo_context.detected_language,
+                    repo_context.detected_framework,
+                ),
             )
             analysis_payload = analysis.as_dict()
     else:

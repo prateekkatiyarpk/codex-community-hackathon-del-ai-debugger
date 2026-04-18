@@ -44,6 +44,9 @@ urlpatterns = [
 ]"""
 
 DEMO_ANALYSIS = {
+    "detected_language": "Python",
+    "detected_framework": "Django",
+    "bug_type": "Queryset shape mismatch",
     "issue_summary": "The post list template tries to reverse post_detail with an empty pk.",
     "root_cause": (
         "The traceback points to Django's url tag failing in posts/list.html. "
@@ -55,12 +58,20 @@ DEMO_ANALYSIS = {
         "file": "posts/views.py",
         "function": "post_list",
     },
-    "suggested_fix": (
-        "Return model instances or include the primary key in the values() call. The "
-        "smallest change is to add \"id\" or \"pk\" to the selected fields and use that "
-        "value in the template."
-    ),
-    "patch_diff": """--- a/posts/views.py
+    "evidence_used": [
+        "The traceback fails in Django's URL reversing during template rendering.",
+        "The template calls post_detail with pk=post.pk.",
+        "The view uses values(\"title\", \"slug\"), so pk is not present in each row.",
+        "The URL pattern requires an integer pk.",
+    ],
+    "recommended_fix": {
+        "title": "Include the primary key in the list query",
+        "explanation": (
+            "Add id to the values() projection and reference post.id in the template. "
+            "This is the smallest change that restores the view/template contract."
+        ),
+        "tradeoff": "It keeps the current lightweight dict query while making the required URL parameter available.",
+        "patch_diff": """--- a/posts/views.py
 +++ b/posts/views.py
 @@
  def post_list(request):
@@ -72,7 +83,22 @@ DEMO_ANALYSIS = {
 @@
 -  <a href="{% url 'post_detail' pk=post.pk %}">{{ post.title }}</a>
 +  <a href="{% url 'post_detail' pk=post.id %}">{{ post.title }}</a>""",
+    },
+    "safest_fix": {
+        "title": "Return Post model instances",
+        "explanation": "Use Post objects in the template so pk and model behavior are always available.",
+        "tradeoff": "This is more robust for templates but may fetch more columns than the current values() query.",
+        "patch_diff": "",
+    },
+    "alternative_fix": {
+        "title": "Use slug-based routing",
+        "explanation": "If post_detail is meant to be slug-addressable, change the URL and template to use slug consistently.",
+        "tradeoff": "This can be cleaner for public URLs, but it touches routing and detail lookup behavior.",
+        "patch_diff": "",
+    },
     "confidence": 0.93,
+    "confidence_label": "High confidence",
+    "confidence_reason": "The traceback, template URL tag, queryset projection, and URL pattern all point to the same missing pk.",
     "regression_test": (
         "Add a Django TestCase that creates a published Post, requests the post_list URL, "
         "asserts a 200 response, and asserts the rendered page contains the post_detail URL "

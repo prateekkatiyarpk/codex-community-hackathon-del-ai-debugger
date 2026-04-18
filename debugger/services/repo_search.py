@@ -4,10 +4,27 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from debugger.services.traceback_parse import FailureClues, parse_failure_clues
+
 
 ALLOWED_EXTENSIONS = {
     ".py",
     ".html",
+    ".jinja",
+    ".jinja2",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".java",
+    ".go",
+    ".rb",
+    ".php",
+    ".rs",
+    ".css",
+    ".scss",
+    ".vue",
+    ".svelte",
     ".txt",
     ".md",
     ".yaml",
@@ -15,6 +32,14 @@ ALLOWED_EXTENSIONS = {
     ".json",
     ".toml",
     ".ini",
+    ".xml",
+    ".gradle",
+    ".mod",
+}
+CONFIG_FILE_NAMES = {
+    "gemfile",
+    "dockerfile",
+    "makefile",
 }
 SKIP_DIRS = {
     ".git",
@@ -29,21 +54,28 @@ SKIP_DIRS = {
     "dist",
     "build",
 }
-DJANGO_RELATED_NAMES = {"views.py", "models.py", "urls.py", "tests.py", "forms.py", "admin.py"}
+COMMON_RELATED_NAMES = {
+    "views.py",
+    "models.py",
+    "urls.py",
+    "tests.py",
+    "forms.py",
+    "admin.py",
+    "settings.py",
+    "serializers.py",
+    "package.json",
+    "tsconfig.json",
+    "pom.xml",
+    "build.gradle",
+    "go.mod",
+    "gemfile",
+    "composer.json",
+    "cargo.toml",
+}
 MAX_FILE_BYTES = 220_000
 MAX_FILES_TO_SCAN = 900
 MAX_SNIPPETS = 6
 SNIPPET_RADIUS = 18
-
-
-@dataclass(frozen=True)
-class TracebackClues:
-    file_names: set[str]
-    line_numbers: dict[str, int]
-    template_names: set[str]
-    exception_type: str
-    module_terms: set[str]
-    symbols: set[str]
 
 
 @dataclass(frozen=True)
@@ -62,7 +94,7 @@ class CodeSnippet:
 
 
 def discover_repo_context(root: Path, traceback_text: str) -> list[CodeSnippet]:
-    clues = parse_traceback_clues(traceback_text)
+    clues = parse_failure_clues(traceback_text)
     candidates = []
 
     for path in iter_source_files(root):
@@ -89,56 +121,8 @@ def discover_repo_context(root: Path, traceback_text: str) -> list[CodeSnippet]:
     return sorted(candidates, key=lambda item: item.score, reverse=True)[:MAX_SNIPPETS]
 
 
-def parse_traceback_clues(traceback_text: str) -> TracebackClues:
-    file_names: set[str] = set()
-    line_numbers: dict[str, int] = {}
-    module_terms: set[str] = set()
-    symbols: set[str] = set()
-    template_names: set[str] = set()
-
-    for match in re.finditer(r'File "([^"]+)", line (\d+)(?:, in ([\w_<>]+))?', traceback_text):
-        file_path = match.group(1).replace("\\", "/")
-        line_number = int(match.group(2))
-        symbol = match.group(3)
-        basename = Path(file_path).name
-        normalized = _strip_repo_prefix(file_path)
-
-        file_names.update({basename, normalized})
-        line_numbers[basename] = line_number
-        line_numbers[normalized] = line_number
-        if symbol:
-            symbols.add(symbol)
-
-        for part in Path(normalized).parts:
-            if part and part not in {".", ".."} and not part.endswith((".py", ".html")):
-                module_terms.add(part)
-
-    for match in re.finditer(r"['\"]([^'\"]+\.(?:html|txt))['\"]", traceback_text):
-        template_name = match.group(1).replace("\\", "/")
-        template_names.add(template_name)
-        file_names.add(Path(template_name).name)
-
-    for match in re.finditer(r"\bin ([A-Za-z_][A-Za-z0-9_<>]*)", traceback_text):
-        symbols.add(match.group(1))
-
-    for match in re.finditer(r"Reverse for ['\"]([^'\"]+)['\"]", traceback_text):
-        symbols.add(match.group(1))
-
-    exception_type = ""
-    for line in reversed(traceback_text.strip().splitlines()):
-        match = re.match(r"([\w.]+(?:Error|Exception|DoesNotExist|NoReverseMatch))(?::|\s)", line.strip())
-        if match:
-            exception_type = match.group(1).split(".")[-1]
-            break
-
-    return TracebackClues(
-        file_names={value for value in file_names if value},
-        line_numbers=line_numbers,
-        template_names={value for value in template_names if value},
-        exception_type=exception_type,
-        module_terms={value for value in module_terms if value},
-        symbols={value for value in symbols if value and value != "<module>"},
-    )
+def parse_traceback_clues(traceback_text: str) -> FailureClues:
+    return parse_failure_clues(traceback_text)
 
 
 def iter_source_files(root: Path):
@@ -151,7 +135,7 @@ def iter_source_files(root: Path):
         parts = set(path.relative_to(root).parts)
         if parts & SKIP_DIRS:
             continue
-        if path.suffix.lower() not in ALLOWED_EXTENSIONS:
+        if path.suffix.lower() not in ALLOWED_EXTENSIONS and path.name.lower() not in CONFIG_FILE_NAMES:
             continue
         try:
             if path.stat().st_size > MAX_FILE_BYTES:
@@ -162,7 +146,7 @@ def iter_source_files(root: Path):
         yield path
 
 
-def score_file(relative_path: str, content: str, clues: TracebackClues) -> tuple[int, list[str]]:
+def score_file(relative_path: str, content: str, clues: FailureClues) -> tuple[int, list[str]]:
     path_lower = relative_path.lower()
     basename = Path(relative_path).name
     content_lower = content.lower()
@@ -183,9 +167,15 @@ def score_file(relative_path: str, content: str, clues: TracebackClues) -> tuple
             score += 130
             reasons.append(f"template match: {template}")
 
-    if basename in DJANGO_RELATED_NAMES or "/templates/" in path_lower or path_lower.startswith("templates/"):
+    if (
+        basename.lower() in COMMON_RELATED_NAMES
+        or "/templates/" in path_lower
+        or path_lower.startswith("templates/")
+        or "/test" in path_lower
+        or "/spec" in path_lower
+    ):
         score += 18
-        reasons.append("Django-related file")
+        reasons.append("common framework file")
 
     for term in clues.module_terms:
         term_lower = term.lower()
@@ -199,6 +189,16 @@ def score_file(relative_path: str, content: str, clues: TracebackClues) -> tuple
             score += 22
             reasons.append(f"symbol match: {symbol}")
 
+    for test_name in clues.test_names:
+        if test_name.lower() in content_lower or test_name.lower() in path_lower:
+            score += 30
+            reasons.append(f"test match: {test_name}")
+
+    for package in clues.package_terms:
+        if package.lower() in content_lower or package.lower() in path_lower:
+            score += 20
+            reasons.append(f"package match: {package}")
+
     if clues.exception_type and clues.exception_type.lower() in content_lower:
         score += 15
         reasons.append(f"exception mention: {clues.exception_type}")
@@ -206,7 +206,7 @@ def score_file(relative_path: str, content: str, clues: TracebackClues) -> tuple
     return score, reasons
 
 
-def find_best_line(relative_path: str, content: str, clues: TracebackClues) -> int:
+def find_best_line(relative_path: str, content: str, clues: FailureClues) -> int:
     basename = Path(relative_path).name
     for key in (relative_path, basename):
         if key in clues.line_numbers:

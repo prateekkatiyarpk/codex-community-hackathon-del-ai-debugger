@@ -1,24 +1,24 @@
 # AI Debugger
 
-A small hackathon MVP Django app for turning Python/Django tracebacks plus repo context into a focused debugging brief.
+A small hackathon MVP Django app for turning failure logs plus repo context into a focused debugging brief.
 
 The app gives you:
 
 - Issue summary
 - Likely root cause
-- Suspected file/function/class
-- Suggested minimal fix
+- Suspected file/function/class/component
+- Ranked fix options
 - Optional patch diff
-- Confidence score
-- One regression test suggestion
+- Confidence score and rationale
+- One regression test or validation step
 
 ## Repo-Aware Debugging
 
 Normal flow:
 
-1. Paste a traceback or failing test output.
+1. Paste a stack trace, error log, failing test output, or build error.
 2. Provide either a public GitHub repo URL or upload a small repository ZIP.
-3. AI Debugger extracts likely filenames, line numbers, templates, Django modules, and nearby snippets before asking the LLM for a diagnosis.
+3. AI Debugger extracts likely filenames, line numbers, templates/components, packages, symbols, and nearby snippets before asking the LLM for a diagnosis.
 
 If repo access is unavailable, use **Optional extra context** as a manual fallback.
 
@@ -52,7 +52,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000).
 
 ## Demo
 
-Click **Load Demo Example**, then **Analyze Bug**. If `OPENAI_API_KEY` is not set, the built-in demo still returns a deterministic structured analysis so the UI can be shown reliably.
+Click **Load Demo Example**, then **Analyze Failure**. If `OPENAI_API_KEY` is not set, the built-in demo still returns a deterministic structured analysis so the UI can be shown reliably.
 
 ## Notes
 

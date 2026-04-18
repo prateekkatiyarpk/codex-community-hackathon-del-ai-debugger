@@ -17,6 +17,7 @@ from debugger.services.debugger import (
     fallback_analysis,
     parse_model_response,
 )
+from debugger.services.language_detect import detect_language_profile
 from debugger.services.repo_ingest import build_repository_context
 from debugger.services.repo_search import discover_repo_context, parse_traceback_clues
 
@@ -39,12 +40,37 @@ class DebuggerServiceTests(SimpleTestCase):
     def test_parse_model_response_returns_analysis(self):
         raw = json.dumps(
             {
+                "detected_language": "Python",
+                "detected_framework": "Django",
+                "bug_type": "Queryset shape mismatch",
                 "issue_summary": "Template reverses a URL with a missing pk.",
                 "root_cause": "The context does not include a primary key.",
                 "suspected_location": {"file": "posts/views.py", "function": "post_list"},
-                "suggested_fix": "Include id in the values() query.",
-                "patch_diff": "",
+                "evidence_used": [
+                    "Traceback points to template rendering.",
+                    "URL reverse needs pk.",
+                ],
+                "recommended_fix": {
+                    "title": "Include id in values query",
+                    "explanation": "Include id in the values() query.",
+                    "tradeoff": "Smallest change.",
+                    "patch_diff": "",
+                },
+                "safest_fix": {
+                    "title": "Use model instances",
+                    "explanation": "Pass Post instances to the template.",
+                    "tradeoff": "More robust but broader.",
+                    "patch_diff": "",
+                },
+                "alternative_fix": {
+                    "title": "Use slug route",
+                    "explanation": "Use slug consistently in route and template.",
+                    "tradeoff": "Changes URL contract.",
+                    "patch_diff": "",
+                },
                 "confidence": 0.82,
+                "confidence_label": "High confidence",
+                "confidence_reason": "File and URL evidence align.",
                 "regression_test": "Render the list page with one Post and assert it links to detail.",
             }
         )
@@ -58,9 +84,13 @@ class DebuggerServiceTests(SimpleTestCase):
             analysis.as_dict()["suspected_location"]["function"],
             "post_list",
         )
+        self.assertEqual(analysis.detected_language, "Python")
+        self.assertEqual(analysis.detected_framework, "Django")
+        self.assertEqual(analysis.bug_type, "Queryset shape mismatch")
+        self.assertEqual(analysis.recommended_fix.title, "Include id in values query")
         self.assertEqual(analysis.confidence_label, "High confidence")
         self.assertEqual(len(analysis.timeline_steps), 5)
-        self.assertIn("Traceback parsed", analysis.timeline_steps[0]["title"])
+        self.assertIn("Failure log parsed", analysis.timeline_steps[0]["title"])
         self.assertTrue(analysis.diagnosis_reasons)
 
     def test_analysis_validation_rejects_missing_required_fields(self):
@@ -79,7 +109,9 @@ class DebuggerServiceTests(SimpleTestCase):
 
         self.assertEqual(DEBUGGER_RESPONSE_FORMAT["type"], "json_schema")
         self.assertTrue(DEBUGGER_RESPONSE_FORMAT["json_schema"]["strict"])
-        self.assertIn("patch_diff", schema["required"])
+        self.assertIn("evidence_used", schema["required"])
+        self.assertIn("recommended_fix", schema["required"])
+        self.assertIn("confidence_label", schema["required"])
         self.assertFalse(schema["additionalProperties"])
 
 
@@ -97,7 +129,8 @@ class DebuggerViewTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Diagnosis Complete")
         self.assertContains(response, "Analysis Timeline")
-        self.assertContains(response, "Why this diagnosis?")
+        self.assertContains(response, "Evidence Used")
+        self.assertContains(response, "Ranked fix options")
         self.assertContains(response, "Copy JSON")
         self.assertContains(response, "The post list template tries to reverse")
 
@@ -128,6 +161,8 @@ class DebuggerViewTests(SimpleTestCase):
         self.assertContains(response, "posts/views.py")
         _args, kwargs = mock_analyze_bug.call_args
         self.assertIn("posts/views.py", kwargs["code_context"])
+        self.assertEqual(kwargs["detected_language"], "Python")
+        self.assertEqual(kwargs["detected_framework"], "Unknown")
 
 
 class RepositoryContextTests(SimpleTestCase):
@@ -178,6 +213,38 @@ class RepositoryContextTests(SimpleTestCase):
         self.assertTrue(context.errors)
         self.assertIn("unsafe", context.errors[0])
         self.assertIn("fallback", context.combined_context)
+
+    def test_language_detection_supports_javascript_repo(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "package.json").write_text(
+                json.dumps({"dependencies": {"react": "^19.0.0"}}),
+                encoding="utf-8",
+            )
+            (root / "src").mkdir()
+            (root / "src" / "App.jsx").write_text("export function App() { return null; }", encoding="utf-8")
+
+            profile = detect_language_profile(root)
+
+        self.assertEqual(profile.language, "JavaScript")
+        self.assertEqual(profile.framework, "React")
+
+    def test_language_detection_handles_github_archive_top_folder(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            app_root = root / "demo-main"
+            app_root.mkdir()
+            (app_root / "package.json").write_text(
+                json.dumps({"dependencies": {"next": "^15.0.0", "react": "^19.0.0"}}),
+                encoding="utf-8",
+            )
+            (app_root / "pages").mkdir()
+            (app_root / "pages" / "index.tsx").write_text("export default function Home() { return null; }", encoding="utf-8")
+
+            profile = detect_language_profile(root)
+
+        self.assertEqual(profile.language, "TypeScript")
+        self.assertEqual(profile.framework, "Next.js")
 
     def test_zip_upload_takes_precedence_over_github_url_validation(self):
         uploaded = SimpleUploadedFile(
