@@ -305,6 +305,7 @@ class DebuggerViewTests(SimpleTestCase):
                 "error_log": DEMO_ERROR_LOG,
                 "code_context": DEMO_CODE_CONTEXT,
             },
+            follow=True,
         )
 
         self.assertEqual(response.status_code, 200)
@@ -350,6 +351,7 @@ class DebuggerViewTests(SimpleTestCase):
                     "github_url": "https://github.com/acme/private-repo",
                     "github_token": "github_pat_secret",
                 },
+                follow=True,
             )
 
         self.assertEqual(response.status_code, 200)
@@ -373,6 +375,56 @@ class DebuggerViewTests(SimpleTestCase):
         self.assertNotContains(response, token)
 
     @patch("debugger.views.analyze_bug")
+    def test_successful_post_redirects_and_reload_clears_previous_analysis(self, mock_analyze_bug):
+        mock_analyze_bug.return_value = analysis_from_dict(DEMO_ANALYSIS, source="llm")
+        client = Client()
+
+        response = client.post(
+            "/",
+            {
+                "error_log": "CUSTOM_FAILURE_MARKER",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.redirect_chain, [("/", 302)])
+        self.assertContains(response, "Diagnosis Complete")
+        self.assertNotContains(response, "CUSTOM_FAILURE_MARKER")
+
+        reload_response = client.get("/")
+
+        self.assertEqual(reload_response.status_code, 200)
+        self.assertNotContains(reload_response, "Diagnosis Complete")
+
+    @patch("debugger.views.analyze_bug")
+    @patch("debugger.views.build_repository_context_from_workspace")
+    def test_repo_error_without_snippets_uses_compact_fallback_notice(self, mock_build_context, mock_analyze_bug):
+        mock_analyze_bug.return_value = analysis_from_dict(DEMO_ANALYSIS, source="llm")
+        mock_build_context.return_value = RepositoryContext(
+            source="github",
+            repo_label="https://github.com/acme/private-repo",
+            language_profile=LanguageProfile(language="Python", framework="Django"),
+            snippets=[],
+            errors=["GitHub rate limit was reached while fetching this repo. Try again later, add a token, or use ZIP upload."],
+            combined_context="",
+        )
+
+        response = Client().post(
+            "/",
+            {
+                "error_log": REPO_TRACEBACK,
+                "github_url": "https://github.com/acme/private-repo",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Repository context unavailable.")
+        self.assertContains(response, "Analysis continued using the failure log and any optional extra context.")
+        self.assertNotContains(response, "0 top files shown")
+
+    @patch("debugger.views.analyze_bug")
     def test_zip_upload_discovers_context_for_analysis(self, mock_analyze_bug):
         mock_analyze_bug.return_value = analysis_from_dict(DEMO_ANALYSIS, source="llm")
         repo_zip = SimpleUploadedFile(
@@ -393,6 +445,7 @@ class DebuggerViewTests(SimpleTestCase):
                 "error_log": REPO_TRACEBACK,
                 "repo_zip": repo_zip,
             },
+            follow=True,
         )
 
         self.assertEqual(response.status_code, 200)
@@ -444,6 +497,7 @@ class DebuggerViewTests(SimpleTestCase):
                 "repro_command": "pytest",
                 "repo_zip": repo_zip,
             },
+            follow=True,
         )
 
         self.assertEqual(response.status_code, 200)
@@ -481,6 +535,7 @@ class DebuggerViewTests(SimpleTestCase):
                 "repro_command": "pytest",
                 "repo_zip": repo_zip,
             },
+            follow=True,
         )
 
         self.assertEqual(response.status_code, 200)

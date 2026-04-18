@@ -850,6 +850,10 @@ label {
   background: var(--surface-elevated);
 }
 
+.repo-status-card {
+  margin-top: 14px;
+}
+
 .result-card p,
 .diff-block p {
   margin: 0;

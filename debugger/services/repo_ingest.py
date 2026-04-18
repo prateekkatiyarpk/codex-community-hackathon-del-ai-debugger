@@ -331,7 +331,7 @@ def _github_http_error_message(exc: urllib.error.HTTPError, *, github_token: str
         return "GitHub access token was rejected. Check the token value and confirm it can read this repo."
 
     if code == 403 and headers.get("X-RateLimit-Remaining") == "0":
-        return "GitHub rate limit was reached while trying to access this repo. Try again later or use ZIP upload."
+        return "GitHub rate limit was reached while fetching this repo. Try again later, add a token, or use ZIP upload."
 
     if code == 403:
         if token_present:

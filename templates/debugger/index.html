@@ -362,7 +362,7 @@
           </details>
         {% endif %}
 
-        {% if repo_context and repo_context.has_repo_input %}
+        {% if repo_context and repo_context.has_repo_input and repo_context.snippets %}
           <details class="why-panel context-panel">
             <summary>
               <span>Context discovered from repo</span>
@@ -406,6 +406,29 @@
               {% endif %}
             </div>
           </details>
+        {% endif %}
+
+        {% if repo_context and repo_context.has_repo_input and not repo_context.snippets %}
+          <article class="result-card repo-status-card">
+            <div class="section-kicker">
+              <p class="eyebrow">Repository access</p>
+              <h3>{{ repo_context.source_label }}</h3>
+              <p>{{ repo_context.repo_label }}</p>
+            </div>
+            {% if repo_context.errors %}
+              <div class="notice">
+                <strong>Repository context unavailable.</strong>
+                <span>
+                  {% for error in repo_context.errors %}
+                    {{ error }}{% if not forloop.last %} {% endif %}
+                  {% endfor %}
+                </span>
+              </div>
+              <p class="context-empty">Analysis continued using the failure log and any optional extra context.</p>
+            {% else %}
+              <p class="context-empty">No strong repository matches were found. Analysis continued using the failure log and any optional extra context.</p>
+            {% endif %}
+          </article>
         {% endif %}
 
         <details class="why-panel timeline-panel">
