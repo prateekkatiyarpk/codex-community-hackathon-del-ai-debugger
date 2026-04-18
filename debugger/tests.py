@@ -32,6 +32,13 @@ REPO_TRACEBACK = """Traceback (most recent call last):
     return render(request, "posts/list.html", {"posts": posts})
 django.urls.exceptions.NoReverseMatch: Reverse for 'post_detail' with keyword arguments '{'pk': ''}' not found."""
 
+INTENTIONAL_FAILURE_TRACEBACK = """Traceback (most recent call last):
+  File "/app/debugger/views.py", line 100, in intentional_failure
+    detail_url = _build_demo_detail_url(demo_post)
+  File "/app/debugger/views.py", line 113, in _build_demo_detail_url
+    return reverse("debugger:demo-detail", kwargs={"pk": post.get("pk", "")})
+django.urls.exceptions.NoReverseMatch: Reverse for 'demo-detail' with keyword arguments '{'pk': ''}' not found. 1 pattern(s) tried: ['__demo__/post/(?P<pk>[0-9]+)/\\\\Z']"""
+
 PYTEST_FAILURE = """FAILED tests/test_views.py::test_post_list_links - django.urls.exceptions.NoReverseMatch: Reverse for 'post_detail' not found"""
 REPRO_OUTPUT = "$ pytest\nExit code: 1\n\nstdout:\nFAILED tests/test_views.py::test_post_list_links"
 
@@ -100,6 +107,54 @@ class DebuggerServiceTests(SimpleTestCase):
         self.assertEqual(len(analysis.timeline_steps), 5)
         self.assertIn("Failure log parsed", analysis.timeline_steps[0]["title"])
         self.assertTrue(analysis.diagnosis_reasons)
+
+    def test_parse_model_response_caps_confidence_and_deduplicates_evidence(self):
+        raw = json.dumps(
+            {
+                "detected_language": "Python",
+                "detected_framework": "Django",
+                "bug_type": "NoReverseMatch",
+                "issue_summary": "Reverse() receives an empty pk.",
+                "root_cause": "The view passes an empty pk into reverse().",
+                "suspected_location": {"file": "debugger/views.py", "function": "_build_demo_detail_url"},
+                "evidence_used": [
+                    "Traceback points to debugger/views.py line 113.",
+                    "Traceback points to debugger/views.py line 113.",
+                    "Route requires an integer pk.",
+                    "Missing pk is visible in the log.",
+                    "The helper reads post.get('pk', '').",
+                    "This duplicate line should be dropped.",
+                ],
+                "recommended_fix": {
+                    "title": "Provide a pk",
+                    "explanation": "Pass a numeric pk into reverse().",
+                    "tradeoff": "Smallest change.",
+                    "patch_diff": "",
+                },
+                "safest_fix": {
+                    "title": "Guard missing pk",
+                    "explanation": "Check for a missing pk first.",
+                    "tradeoff": "More defensive.",
+                    "patch_diff": "",
+                },
+                "alternative_fix": {
+                    "title": "Return a fallback URL",
+                    "explanation": "Return a fallback response instead of raising.",
+                    "tradeoff": "Changes behavior.",
+                    "patch_diff": "",
+                },
+                "confidence": 0.99,
+                "confidence_label": "High confidence",
+                "confidence_reason": "The traceback and repo point to the same call site.",
+                "regression_test": "Add a test for the failure route.",
+            }
+        )
+
+        analysis = parse_model_response(raw)
+
+        self.assertEqual(analysis.confidence, 0.94)
+        self.assertLessEqual(len(analysis.evidence_used), 5)
+        self.assertEqual(analysis.evidence_used[0], "Traceback points to debugger/views.py line 113.")
 
     def test_analysis_validation_rejects_missing_required_fields(self):
         with self.assertRaises(ValueError):
@@ -227,7 +282,7 @@ class DebuggerViewTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Diagnosis Complete")
         self.assertContains(response, "Analysis Timeline")
-        self.assertContains(response, "Evidence Used")
+        self.assertContains(response, "Why this diagnosis?")
         self.assertContains(response, "Ranked fix options")
         self.assertContains(response, "Copy JSON")
         self.assertContains(response, "The post list template tries to reverse")
@@ -262,6 +317,9 @@ class DebuggerViewTests(SimpleTestCase):
         self.assertIn("posts/views.py", kwargs["code_context"])
         self.assertEqual(kwargs["detected_language"], "Python")
         self.assertEqual(kwargs["detected_framework"], "Django")
+        html = response.content.decode("utf-8")
+        self.assertLess(html.index("Start with the recommended fix"), html.index("Why this diagnosis?"))
+        self.assertLess(html.index("Recommended Patch Diff"), html.index("Context discovered from repo"))
 
     def test_intentional_failure_route_returns_500(self):
         response = Client(raise_request_exception=False).get("/__demo__/intentional-failure/")
@@ -410,6 +468,58 @@ class RepositoryContextTests(SimpleTestCase):
         paths = {snippet.file_path for snippet in snippets}
         self.assertIn("posts/urls.py", paths)
         self.assertIn("posts/templates/posts/list.html", paths)
+
+    def test_discover_repo_context_drops_low_signal_internal_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "debugger").mkdir()
+            (root / "debugger" / "services").mkdir(parents=True)
+            (root / "ai_debugger").mkdir()
+            (root / "debugger" / "views.py").write_text(
+                "\n".join(
+                    [
+                        "from django.urls import reverse",
+                        "",
+                        "def intentional_failure(request):",
+                        "    demo_post = _load_broken_demo_post()",
+                        "    detail_url = _build_demo_detail_url(demo_post)",
+                        "    return HttpResponse(detail_url)",
+                        "",
+                        "def _build_demo_detail_url(post):",
+                        "    return reverse('debugger:demo-detail', kwargs={'pk': post.get('pk', '')})",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / "debugger" / "urls.py").write_text(
+                "urlpatterns = [path('__demo__/post/<int:pk>/', views.demo_detail, name='demo-detail')]\n",
+                encoding="utf-8",
+            )
+            (root / "ai_debugger" / "urls.py").write_text(
+                "urlpatterns = [path('', include('debugger.urls'))]\n",
+                encoding="utf-8",
+            )
+            (root / "debugger" / "tests.py").write_text(
+                "def test_intentional_failure_route_returns_500(): pass\n",
+                encoding="utf-8",
+            )
+            (root / "debugger" / "demo.py").write_text(
+                'DEMO_ERROR_LOG = "Traceback (most recent call last): ..."\n',
+                encoding="utf-8",
+            )
+            (root / "debugger" / "services" / "repo_search.py").write_text(
+                "def score_file(relative_path, content, clues):\n    return 0, []\n",
+                encoding="utf-8",
+            )
+
+            snippets = discover_repo_context(root, INTENTIONAL_FAILURE_TRACEBACK)
+
+        paths = [snippet.file_path for snippet in snippets]
+        self.assertEqual(paths[0], "debugger/views.py")
+        self.assertIn("debugger/urls.py", paths)
+        self.assertNotIn("ai_debugger/urls.py", paths)
+        self.assertNotIn("debugger/services/repo_search.py", paths)
+        self.assertLessEqual(len(paths), 4)
 
     def test_build_repository_context_reports_unsafe_zip_path(self):
         uploaded = SimpleUploadedFile(

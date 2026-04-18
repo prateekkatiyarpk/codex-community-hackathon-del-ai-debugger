@@ -212,138 +212,10 @@
           </div>
         {% endif %}
 
-        {% if repo_context and repo_context.has_repo_input %}
-          <section class="context-section" aria-labelledby="context-title">
-            <div class="section-kicker context-heading">
-              <div>
-                <p class="eyebrow">Context discovered from repo</p>
-                <h3 id="context-title">{{ repo_context.source_label }}</h3>
-                <p>{{ repo_context.repo_label }}</p>
-              </div>
-              <span class="context-count">{{ repo_context.snippets|length }} files inspected</span>
-            </div>
-
-            {% if repo_context.errors %}
-              <div class="notice">
-                <strong>Repository context fallback.</strong>
-                <span>
-                  {% for error in repo_context.errors %}
-                    {{ error }}{% if not forloop.last %} {% endif %}
-                  {% endfor %}
-                </span>
-              </div>
-            {% endif %}
-
-            {% if repo_context.snippets %}
-              <div class="snippet-grid">
-                {% for snippet in repo_context.snippets %}
-                  <article class="snippet-card">
-                    <div class="snippet-header">
-                      <h4>{{ snippet.file_path }}</h4>
-                      <span>{{ snippet.start_line }}-{{ snippet.end_line }}</span>
-                    </div>
-                    <p>{{ snippet.reason }}</p>
-                    <pre><code>{{ snippet.preview }}</code></pre>
-                  </article>
-                {% endfor %}
-              </div>
-            {% else %}
-              <p class="context-empty">No strongly matching repository files were found. The analysis used the failure log and any optional extra context instead.</p>
-            {% endif %}
-          </section>
-        {% endif %}
-
-        {% if command_capture and command_capture.has_output %}
-          <details class="why-panel command-output-panel">
-            <summary>Captured Command Output{% if command_output_used_for_analysis %} Used for Analysis{% endif %}</summary>
-            <div class="command-output-body">
-              <div class="badge-row command-meta-row">
-                <span class="meta-badge">Command: {{ command_capture.command }}</span>
-                {% if command_capture.exit_code is not None %}
-                  <span class="meta-badge">Exit code: {{ command_capture.exit_code }}</span>
-                {% endif %}
-                {% if command_capture.timed_out %}
-                  <span class="meta-badge">Timed out</span>
-                {% endif %}
-              </div>
-              <div class="section-title-row command-output-actions">
-                <p class="command-output-copy">Captured stdout and stderr from the repro command.</p>
-                <button type="button" class="button button-small button-secondary" data-copy-source="captured-command-output">Copy Output</button>
-              </div>
-              <pre><code id="captured-command-output">{{ command_capture.display_output }}</code></pre>
-            </div>
-          </details>
-        {% endif %}
-
-        <section class="timeline-section" aria-labelledby="timeline-title">
-          <div class="section-kicker">
-            <p class="eyebrow">Analysis Timeline</p>
-            <h3 id="timeline-title">What the debugging agent checked</h3>
-          </div>
-          <div class="timeline-list">
-            {% for step in analysis.timeline_steps %}
-              <article class="timeline-item">
-                <span class="timeline-badge">{{ step.badge }}</span>
-                <div>
-                  <h4>{{ step.title }}</h4>
-                  <p>{{ step.detail }}</p>
-                </div>
-              </article>
-            {% endfor %}
-          </div>
-        </section>
-
-        <div class="result-grid">
-          <article class="result-card">
-            <h3>Issue Summary</h3>
-            <p>{{ analysis.issue_summary }}</p>
-          </article>
-
-          <article class="result-card">
-            <h3>Root Cause</h3>
-            <p>{{ analysis.root_cause }}</p>
-          </article>
-
-          <article class="result-card compact-card">
-            <h3>Suspected Location</h3>
-            <dl class="location-list">
-              <div>
-                <dt>File</dt>
-                <dd>{{ analysis.suspected_location.file }}</dd>
-              </div>
-              <div>
-                <dt>Function</dt>
-                <dd>{{ analysis.suspected_location.function }}</dd>
-              </div>
-            </dl>
-          </article>
-
-          <article class="result-card compact-card">
-            <h3>Confidence Score</h3>
-            <p class="score-text">{{ analysis.confidence }}</p>
-            <p class="confidence-label">{{ analysis.confidence_label }}</p>
-            <p class="confidence-copy">{{ analysis.confidence_explanation }}</p>
-          </article>
-
-          <article class="result-card">
-            <h3>Regression Test / Validation</h3>
-            <p>{{ analysis.regression_test }}</p>
-          </article>
-        </div>
-
-        <details class="why-panel evidence-panel" open>
-          <summary>Evidence Used</summary>
-          <ul>
-            {% for evidence in analysis.evidence_used %}
-              <li>{{ evidence }}</li>
-            {% endfor %}
-          </ul>
-        </details>
-
         <section class="fix-options-section" aria-labelledby="fix-options-title">
           <div class="section-kicker">
             <p class="eyebrow">Ranked fix options</p>
-            <h3 id="fix-options-title">What to try next</h3>
+            <h3 id="fix-options-title">Start with the recommended fix</h3>
           </div>
           <div class="fix-options-grid">
             <article class="fix-card fix-card-primary">
@@ -392,6 +264,142 @@
             <p>No patch diff suggested. The analyzer needs more evidence before proposing code changes.</p>
           {% endif %}
         </article>
+
+        <div class="result-grid">
+          <article class="result-card">
+            <h3>Issue Summary</h3>
+            <p>{{ analysis.issue_summary }}</p>
+          </article>
+
+          <article class="result-card">
+            <h3>Root Cause</h3>
+            <p>{{ analysis.root_cause }}</p>
+          </article>
+
+          <article class="result-card compact-card">
+            <h3>Suspected Location</h3>
+            <dl class="location-list">
+              <div>
+                <dt>File</dt>
+                <dd>{{ analysis.suspected_location.file }}</dd>
+              </div>
+              <div>
+                <dt>Function</dt>
+                <dd>{{ analysis.suspected_location.function }}</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="result-card compact-card">
+            <h3>Confidence Score</h3>
+            <p class="score-text">{{ analysis.confidence|floatformat:2 }}</p>
+            <p class="confidence-label">{{ analysis.confidence_label }}</p>
+            <p class="confidence-copy">{{ analysis.confidence_explanation }}</p>
+          </article>
+
+          <article class="result-card">
+            <h3>Regression Test / Validation</h3>
+            <p>{{ analysis.regression_test }}</p>
+          </article>
+        </div>
+
+        <details class="why-panel evidence-panel">
+          <summary>Why this diagnosis?</summary>
+          <ul>
+            {% for evidence in analysis.diagnosis_reasons %}
+              <li>{{ evidence }}</li>
+            {% endfor %}
+          </ul>
+        </details>
+
+        {% if command_capture and command_capture.has_output %}
+          <details class="why-panel command-output-panel">
+            <summary>Captured Command Output{% if command_output_used_for_analysis %} Used for Analysis{% endif %}</summary>
+            <div class="command-output-body">
+              <div class="badge-row command-meta-row">
+                <span class="meta-badge">Command: {{ command_capture.command }}</span>
+                {% if command_capture.exit_code is not None %}
+                  <span class="meta-badge">Exit code: {{ command_capture.exit_code }}</span>
+                {% endif %}
+                {% if command_capture.timed_out %}
+                  <span class="meta-badge">Timed out</span>
+                {% endif %}
+              </div>
+              <div class="section-title-row command-output-actions">
+                <p class="command-output-copy">Captured stdout and stderr from the repro command.</p>
+                <button type="button" class="button button-small button-secondary" data-copy-source="captured-command-output">Copy Output</button>
+              </div>
+              <pre><code id="captured-command-output">{{ command_capture.display_output }}</code></pre>
+            </div>
+          </details>
+        {% endif %}
+
+        {% if repo_context and repo_context.has_repo_input %}
+          <details class="why-panel context-panel">
+            <summary>
+              <span>Context discovered from repo</span>
+              <span class="summary-meta">{{ repo_context.snippets|length }} top files shown</span>
+            </summary>
+            <div class="details-panel-body">
+              <div class="section-kicker context-heading">
+                <div>
+                  <p class="eyebrow">Context discovered from repo</p>
+                  <h3 id="context-title">{{ repo_context.source_label }}</h3>
+                  <p>{{ repo_context.repo_label }}</p>
+                </div>
+              </div>
+
+              {% if repo_context.errors %}
+                <div class="notice">
+                  <strong>Repository context fallback.</strong>
+                  <span>
+                    {% for error in repo_context.errors %}
+                      {{ error }}{% if not forloop.last %} {% endif %}
+                    {% endfor %}
+                  </span>
+                </div>
+              {% endif %}
+
+              {% if repo_context.snippets %}
+                <div class="snippet-grid">
+                  {% for snippet in repo_context.snippets %}
+                    <article class="snippet-card">
+                      <div class="snippet-header">
+                        <h4>{{ snippet.file_path }}</h4>
+                        <span>{{ snippet.start_line }}-{{ snippet.end_line }}</span>
+                      </div>
+                      <p>{{ snippet.reason }}</p>
+                      <pre><code>{{ snippet.preview }}</code></pre>
+                    </article>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <p class="context-empty">No strongly matching repository files were found. The analysis used the failure log and any optional extra context instead.</p>
+              {% endif %}
+            </div>
+          </details>
+        {% endif %}
+
+        <details class="why-panel timeline-panel">
+          <summary>Analysis timeline</summary>
+          <div class="details-panel-body">
+            <div class="section-kicker">
+              <p class="eyebrow">Analysis Timeline</p>
+              <h3 id="timeline-title">What the debugging agent checked</h3>
+            </div>
+            <div class="timeline-list">
+              {% for step in analysis.timeline_steps %}
+                <article class="timeline-item">
+                  <span class="timeline-badge">{{ step.badge }}</span>
+                  <div>
+                    <h4>{{ step.title }}</h4>
+                    <p>{{ step.detail }}</p>
+                  </div>
+                </article>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
 
         {% if analysis.raw_response %}
           <article class="diff-block raw-response">

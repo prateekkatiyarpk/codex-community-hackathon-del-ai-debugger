@@ -74,8 +74,19 @@ COMMON_RELATED_NAMES = {
 }
 MAX_FILE_BYTES = 220_000
 MAX_FILES_TO_SCAN = 900
-MAX_SNIPPETS = 6
+MAX_SNIPPETS = 4
 SNIPPET_RADIUS = 18
+GENERIC_SYMBOLS = {
+    "args",
+    "kwargs",
+    "render",
+    "request",
+    "response",
+    "reverse",
+    "get_response",
+    "_reverse_with_prefix",
+    "<module>",
+}
 
 
 @dataclass(frozen=True)
@@ -95,7 +106,8 @@ class CodeSnippet:
 
 def discover_repo_context(root: Path, traceback_text: str) -> list[CodeSnippet]:
     clues = parse_failure_clues(traceback_text)
-    candidates = []
+    direct_candidates: list[CodeSnippet] = []
+    support_candidates: list[CodeSnippet] = []
 
     for path in iter_source_files(root):
         relative_path = path.relative_to(root).as_posix()
@@ -104,7 +116,7 @@ def discover_repo_context(root: Path, traceback_text: str) -> list[CodeSnippet]:
         except OSError:
             continue
 
-        score, reasons = score_file(relative_path, content, clues)
+        score, reasons, anchor_hits = score_file(relative_path, content, clues)
         if score <= 0:
             continue
 
@@ -116,9 +128,28 @@ def discover_repo_context(root: Path, traceback_text: str) -> list[CodeSnippet]:
             score=score,
             reason=", ".join(reasons[:3]),
         )
-        candidates.append(snippet)
+        if anchor_hits > 0:
+            direct_candidates.append(snippet)
+        else:
+            support_candidates.append(snippet)
 
-    return sorted(candidates, key=lambda item: item.score, reverse=True)[:MAX_SNIPPETS]
+    direct_candidates = sorted(direct_candidates, key=lambda item: item.score, reverse=True)
+    support_candidates = sorted(support_candidates, key=lambda item: item.score, reverse=True)
+
+    selected = direct_candidates[:MAX_SNIPPETS]
+    remaining = MAX_SNIPPETS - len(selected)
+    if remaining <= 0:
+        return selected
+
+    if len(direct_candidates) <= 1:
+        max_support = min(2, remaining)
+    elif len(direct_candidates) == 2:
+        support_candidates = [snippet for snippet in support_candidates if snippet.score >= 60]
+        max_support = min(1, remaining)
+    else:
+        max_support = 0
+
+    return selected + support_candidates[:max_support]
 
 
 def parse_traceback_clues(traceback_text: str) -> FailureClues:
@@ -146,81 +177,130 @@ def iter_source_files(root: Path):
         yield path
 
 
-def score_file(relative_path: str, content: str, clues: FailureClues) -> tuple[int, list[str]]:
+def score_file(relative_path: str, content: str, clues: FailureClues) -> tuple[int, list[str], int]:
     path_lower = relative_path.lower()
     basename = Path(relative_path).name
     content_lower = content.lower()
+    path_parts = {part.lower() for part in Path(relative_path).parts}
+    is_template_file = "/templates/" in path_lower or path_lower.startswith("templates/")
+    is_test_file = "/test" in path_lower or "/spec" in path_lower or basename.lower() == "tests.py"
     score = 0
     reasons: list[str] = []
+    anchor_hits = 0
+    support_hits = 0
 
     for clue_file in clues.file_names:
         clue_lower = clue_file.lower()
         if clue_lower == basename.lower() or path_lower.endswith(clue_lower):
-            score += 120
-            reasons.append(f"filename match: {clue_file}")
+            score += 140
+            anchor_hits += 1
+            _append_reason(reasons, f"traceback file match: {clue_file}")
         elif clue_lower in path_lower:
-            score += 65
-            reasons.append(f"path match: {clue_file}")
+            score += 85
+            anchor_hits += 1
+            _append_reason(reasons, f"traceback path match: {clue_file}")
+
+    for key in (relative_path, basename):
+        if key in clues.line_numbers:
+            score += 60
+            anchor_hits += 1
+            _append_reason(reasons, f"traceback line match: {clues.line_numbers[key]}")
+            break
 
     for template in clues.template_names:
         if template.lower() in path_lower or Path(template).name.lower() == basename.lower():
-            score += 130
-            reasons.append(f"template match: {template}")
+            score += 145
+            anchor_hits += 1
+            _append_reason(reasons, f"template name match: {template}")
 
-    if (
-        basename.lower() in COMMON_RELATED_NAMES
-        or "/templates/" in path_lower
-        or path_lower.startswith("templates/")
-        or "/test" in path_lower
-        or "/spec" in path_lower
-    ):
+    if basename.lower() in COMMON_RELATED_NAMES:
+        score += 8
+        support_hits += 1
+
+    if is_template_file:
+        score += 14
+        support_hits += 1
+        _append_reason(reasons, "template candidate")
+
+    if is_test_file and clues.test_names:
         score += 18
-        reasons.append("common framework file")
+        support_hits += 1
+        _append_reason(reasons, "related test file")
 
     for term in clues.module_terms:
         term_lower = term.lower()
-        if term_lower in path_lower:
-            score += 18
-            reasons.append(f"module path match: {term}")
+        if term_lower in path_parts:
+            score += 16
+            support_hits += 1
+            _append_reason(reasons, f"module path match: {term}")
 
     for symbol in clues.symbols:
         symbol_lower = symbol.lower()
+        if symbol_lower in GENERIC_SYMBOLS:
+            continue
         if re.search(rf"\b{re.escape(symbol_lower)}\b", content_lower):
-            score += 22
-            reasons.append(f"symbol match: {symbol}")
+            if is_test_file and not clues.test_names:
+                score += 10
+                support_hits += 1
+                _append_reason(reasons, f"helper referenced in tests: {symbol}")
+            else:
+                score += 28
+                anchor_hits += 1
+                _append_reason(reasons, f"contains symbol: {symbol}")
 
     for test_name in clues.test_names:
         if test_name.lower() in content_lower or test_name.lower() in path_lower:
-            score += 30
-            reasons.append(f"test match: {test_name}")
+            score += 42
+            anchor_hits += 1
+            _append_reason(reasons, f"test match: {test_name}")
 
     for package in clues.package_terms:
         if package.lower() in content_lower or package.lower() in path_lower:
-            score += 20
-            reasons.append(f"package match: {package}")
+            score += 18
+            support_hits += 1
+            _append_reason(reasons, f"package match: {package}")
 
     if clues.exception_type and clues.exception_type.lower() in content_lower:
-        score += 15
-        reasons.append(f"exception mention: {clues.exception_type}")
+        score += 8
+        support_hits += 1
+        _append_reason(reasons, f"exception mention: {clues.exception_type}")
 
     exception_lower = clues.exception_type.lower()
     if exception_lower in {"noreversematch", "templateerror", "templatedoesnotexist"}:
         if basename.lower() == "urls.py":
-            score += 55
-            reasons.append("Django URL config candidate")
-        if "/templates/" in path_lower or path_lower.startswith("templates/"):
-            score += 40
-            reasons.append("Django template candidate")
+            score += 26
+            support_hits += 1
+            _append_reason(reasons, "URL config candidate")
+        if is_template_file and clues.template_names:
+            score += 26
+            support_hits += 1
+            _append_reason(reasons, "template candidate for routing failure")
         if "{% url" in content_lower or "reverse(" in content_lower:
-            score += 35
-            reasons.append("Django URL usage")
+            score += 24
+            support_hits += 1
+            _append_reason(reasons, "contains reverse() / {% url %}")
 
     if exception_lower in {"improperlyconfigured", "operationalerror", "programmingerror"}:
         if basename.lower() in {"settings.py", "models.py"} or "/migrations/" in path_lower:
             score += 35
-            reasons.append("Python framework configuration candidate")
+            support_hits += 1
+            _append_reason(reasons, "framework configuration candidate")
 
-    return score, reasons
+    if is_test_file and not clues.test_names and anchor_hits == 0:
+        return 0, [], 0
+
+    if anchor_hits == 0 and score < 40:
+        return 0, [], 0
+
+    if is_test_file and not clues.test_names and not any(reason.startswith("traceback") for reason in reasons):
+        score -= 26
+
+    if anchor_hits == 0 and score < 30:
+        return 0, [], 0
+
+    score += min(anchor_hits, 3) * 10 + min(support_hits, 2) * 4
+
+    return score, reasons, anchor_hits
 
 
 def find_best_line(relative_path: str, content: str, clues: FailureClues) -> int:
@@ -310,3 +390,8 @@ def _strip_repo_prefix(file_path: str) -> str:
     if len(parts) > 3:
         return "/".join(parts[-3:])
     return "/".join(parts)
+
+
+def _append_reason(reasons: list[str], reason: str) -> None:
+    if reason not in reasons:
+        reasons.append(reason)

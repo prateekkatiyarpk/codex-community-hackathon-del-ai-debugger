@@ -11,8 +11,10 @@ from debugger.demo import DEMO_ANALYSIS, DEMO_CODE_CONTEXT, DEMO_ERROR_LOG
 SHARED_JSON_INSTRUCTIONS = """Return strict JSON only. Do not include markdown, commentary, or code fences.
 Use one shared schema for every language and framework.
 Favor correctness over completeness: one well-supported diagnosis is better than several guesses.
-Preserve evidence_used with concrete facts from the log, discovered snippets, or manual context.
+Return 3 to 5 evidence_used bullets with concrete facts from the log, discovered snippets, or manual context.
 Preserve all three ranked fix option objects: recommended_fix, safest_fix, and alternative_fix.
+Keep the recommended_fix close to the current code contract when a local change explains the failure.
+Use alternative_fix only for a genuinely valid fallback, not a speculative rewrite of routes, APIs, or data contracts.
 If any patch diff is uncertain, return an empty string for that patch_diff."""
 
 PYTHON_SYSTEM_PROMPT = f"""You are a senior Python debugging assistant.
@@ -201,33 +203,37 @@ class DebuggerAnalysis:
             },
             {
                 "badge": "02",
-                "title": "Repository context inspected",
-                "detail": f"{self.detected_language} / {self.detected_framework} signals were used to rank relevant files.",
+                "title": "Repository context ranked",
+                "detail": f"{self.detected_language} / {self.detected_framework} signals were used to rank likely files.",
             },
             {
                 "badge": "03",
-                "title": "Suspected location inferred",
-                "detail": f"{self.suspected_location.file} - {self.suspected_location.function}",
+                "title": "Likely source located",
+                "detail": _truncate_text(
+                    f"{self.suspected_location.file} - {self.suspected_location.function}",
+                    96,
+                ),
             },
             {
                 "badge": "04",
-                "title": "Evidence weighed",
-                "detail": self.evidence_used[0] if self.evidence_used else self.issue_summary,
+                "title": "Diagnosis confirmed",
+                "detail": _truncate_text(self.evidence_used[0] if self.evidence_used else self.issue_summary, 110),
             },
             {
                 "badge": "05",
-                "title": "Ranked fixes generated",
-                "detail": self.recommended_fix.title,
+                "title": "First fix prepared",
+                "detail": _truncate_text(self.recommended_fix.title, 88),
             },
         ]
 
     @property
     def diagnosis_reasons(self) -> list[str]:
-        return self.evidence_used or [
+        reasons = self.evidence_used or [
             "The issue summary and root cause agree on one primary failure path.",
             "The suspected location gives a concrete place to inspect first.",
             "The recommended fix is intentionally narrow so it can be tested quickly.",
         ]
+        return reasons[:4]
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -440,10 +446,10 @@ def analysis_from_dict(
     if not isinstance(suspected, dict):
         raise ValueError("suspected_location must be an object")
 
-    confidence = _coerce_confidence(payload.get("confidence"))
+    confidence = _calibrate_confidence(_coerce_confidence(payload.get("confidence")))
     detected_language = _string_or_unknown(payload.get("detected_language"), fallback_language)
     detected_framework = _string_or_unknown(payload.get("detected_framework"), fallback_framework)
-    evidence_used = _string_list(payload.get("evidence_used")) or list(fallback_evidence or [])
+    evidence_used = _normalize_evidence(_string_list(payload.get("evidence_used")) or list(fallback_evidence or []))
 
     recommended_fix = _fix_from_payload(
         payload.get("recommended_fix"),
@@ -594,6 +600,10 @@ def _coerce_confidence(value: Any) -> float:
     return max(0.0, min(1.0, confidence))
 
 
+def _calibrate_confidence(confidence: float) -> float:
+    return min(confidence, 0.94)
+
+
 def _coerce_confidence_label(value: Any, confidence: float) -> str:
     if isinstance(value, str) and value.strip() in {
         "High confidence",
@@ -610,7 +620,7 @@ def _coerce_confidence_label(value: Any, confidence: float) -> str:
 
 def _default_confidence_reason(confidence: float) -> str:
     if confidence >= 0.75:
-        return "The error log and repository context point to the same likely cause."
+        return "The error log and repository context point to the same likely cause, though the fix is still inferred from evidence."
     if confidence >= 0.45:
         return "There is useful signal, but more focused context would improve certainty."
     return "Evidence is limited, so treat this as a starting point rather than a final fix."
@@ -633,3 +643,25 @@ def _is_demo_payload(error_log: str, code_context: str) -> bool:
 
 def _normalize(value: str) -> str:
     return "\n".join(line.rstrip() for line in value.strip().splitlines())
+
+
+def _normalize_evidence(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in items:
+        cleaned = _truncate_text(" ".join(item.split()), 210)
+        if not cleaned:
+            continue
+        key = cleaned.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(cleaned)
+    return normalized[:5]
+
+
+def _truncate_text(value: str, limit: int) -> str:
+    value = value.strip()
+    if len(value) <= limit:
+        return value
+    return value[: limit - 1].rstrip() + "..."
