@@ -12,6 +12,6 @@ services:
       - key: DJANGO_ALLOWED_HOSTS
         value: ".onrender.com"
       - key: AI_DEBUGGER_MODEL
-        value: "gpt-5.4"
+        value: "gpt-5.4-mini"
       - key: OPENAI_API_KEY
         sync: false

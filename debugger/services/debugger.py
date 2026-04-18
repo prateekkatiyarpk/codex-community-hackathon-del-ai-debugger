@@ -177,7 +177,7 @@ def _call_openai(error_log: str, code_context: str) -> str:
     except ImportError as exc:
         raise DebuggerServiceError("The openai package is not installed.") from exc
 
-    model = os.environ.get("AI_DEBUGGER_MODEL", "gpt-5.4")
+    model = os.environ.get("AI_DEBUGGER_MODEL", "gpt-5.4-mini")
     timeout = float(os.environ.get("OPENAI_TIMEOUT_SECONDS", "45"))
     base_url = os.environ.get("OPENAI_BASE_URL") or None
     client_kwargs = {"api_key": api_key, "timeout": timeout}
