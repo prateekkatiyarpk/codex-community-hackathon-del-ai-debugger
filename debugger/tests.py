@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import urllib.error
 import zipfile
+from html import unescape
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
@@ -390,12 +391,38 @@ class DebuggerViewTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.redirect_chain, [("/", 302)])
         self.assertContains(response, "Diagnosis Complete")
-        self.assertNotContains(response, "CUSTOM_FAILURE_MARKER")
+        self.assertContains(response, "CUSTOM_FAILURE_MARKER")
 
         reload_response = client.get("/")
 
         self.assertEqual(reload_response.status_code, 200)
         self.assertNotContains(reload_response, "Diagnosis Complete")
+        self.assertNotContains(reload_response, "CUSTOM_FAILURE_MARKER")
+
+    @patch("debugger.views.analyze_bug")
+    def test_successful_post_preserves_safe_form_fields_but_not_github_token(self, mock_analyze_bug):
+        mock_analyze_bug.return_value = analysis_from_dict(DEMO_ANALYSIS, source="llm")
+        client = Client()
+
+        response = client.post(
+            "/",
+            {
+                "error_log": REPO_TRACEBACK,
+                "github_url": "https://github.com/acme/private-repo",
+                "github_token": "github_pat_secret_token_value",
+                "repro_command": "pytest",
+                "code_context": "extra context",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        html = unescape(response.content.decode("utf-8"))
+        self.assertIn(REPO_TRACEBACK, html)
+        self.assertContains(response, "https://github.com/acme/private-repo")
+        self.assertContains(response, "extra context")
+        self.assertContains(response, 'value="pytest"')
+        self.assertNotContains(response, "github_pat_secret_token_value")
 
     @patch("debugger.views.analyze_bug")
     @patch("debugger.views.build_repository_context_from_workspace")

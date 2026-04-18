@@ -75,6 +75,7 @@ def index(request):
                         command_capture=command_capture,
                         command_output_used_for_analysis=command_output_used_for_analysis,
                         failure_source_label=failure_source_label,
+                        form_state=_serialize_form_state(form.cleaned_data),
                     )
                     return redirect("debugger:index")
                 else:
@@ -92,6 +93,7 @@ def index(request):
         form = BugReportForm()
         flash_state = request.session.pop(ANALYSIS_FLASH_SESSION_KEY, None)
         if flash_state:
+            form = BugReportForm(initial=flash_state.get("form_state", {}))
             analysis = _deserialize_analysis(flash_state.get("analysis"))
             if analysis:
                 analysis_payload = analysis.as_dict()
@@ -143,6 +145,7 @@ def _store_analysis_flash(
     command_capture,
     command_output_used_for_analysis: bool,
     failure_source_label: str,
+    form_state: dict[str, str],
 ) -> None:
     request.session[ANALYSIS_FLASH_SESSION_KEY] = {
         "analysis": _serialize_analysis(analysis),
@@ -150,6 +153,7 @@ def _store_analysis_flash(
         "command_capture": _serialize_command_capture(command_capture),
         "command_output_used_for_analysis": command_output_used_for_analysis,
         "failure_source_label": failure_source_label,
+        "form_state": form_state,
     }
 
 
@@ -226,3 +230,12 @@ def _deserialize_command_capture(state: dict | None) -> CommandCapture | None:
         timed_out=bool(state.get("timed_out", False)),
         error_message=state.get("error_message", ""),
     )
+
+
+def _serialize_form_state(cleaned_data: dict) -> dict[str, str]:
+    return {
+        "error_log": cleaned_data.get("error_log", ""),
+        "repro_command": cleaned_data.get("repro_command", ""),
+        "github_url": cleaned_data.get("github_url", ""),
+        "code_context": cleaned_data.get("code_context", ""),
+    }
